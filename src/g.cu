@@ -37,7 +37,6 @@ __global__ void init(int* wMulh, double* dp, double* dp1, int* dnum, int nSample
 			dp1[tid * 256 + i]  = 0;
 			dnum[tid * 256 + i] = 0;
 		}
-
 //		printf("Init: %d\t%g\n",tid, dp[tid * 256 + 255]);
 	}
 }
@@ -92,71 +91,6 @@ __global__ void stretchKernel(GpuMat* dGray, GpuMat* dStretch, int* wMulh, doubl
 
 	}
 //	printf("%d\n",tid);
-}
-
-__global__ void swap_rb_kernel(const PtrStepSz<uchar3> src,PtrStep<uchar3> dst)
-{
-    int x = threadIdx.x + blockIdx.x * blockDim.x;
-    int y = threadIdx.y + blockIdx.y * blockDim.y;
-
-    if(x < src.cols && y < src.rows)
-    {
-        uchar3 v = src(y,x);
-        dst(y,x) = make_uchar3(v.z,v.y,v.x);
-    }
-}
-
-void swap_rb_caller(const PtrStepSz<uchar3>& src,PtrStep<uchar3> dst,cudaStream_t stream)
-{
-    dim3 block(32,8);
-    dim3 grid((src.cols + block.x - 1)/block.x,(src.rows + block.y - 1)/block.y);
-
-    swap_rb_kernel<<<grid,block,0,stream>>>(src,dst);
-    if(stream == 0)
-        cudaDeviceSynchronize();
-}
-
-
-__global__ void testKernel(PtrStepSzb dGray, PtrStepSzb dStretch, int* wMulh, double* dp, double* dp1, int* dnum, int nSamples, int threadsPerBlock)
-{
-
-	int x = //blockIdx.x * blockDim.x +
-			threadIdx.x;
-	int y = //blockIdx.y * blockDim.y +
-			threadIdx.y;
-
-	const int tid = blockDim.x * y + x;
-
-	printf("1\n");
-	if(x < dGray.cols && y < dGray.rows){
-//		dStretch(y,x) = 255;//dGray(x,y);
-		wMulh[0] = dGray.cols * dGray.rows;
-
-		uchar v = dGray.ptr(y)[x];
-		dnum[v]++;
-	}
-
-	//calculate probability
-	__syncthreads();
-	printf("2\n");
-	if(x < 32 && y < 8){
-		dp[tid] = (double)dnum[tid] / (double)wMulh[0];
-	}
-
-	//p1[i]=sum(p[j]);  j<=i;
-	__syncthreads();
-	printf("3\n");
-	if(x < 32 && y < 8){
-		for(int k = 0;k <= tid; k++)
-			dp1[tid] += dp[k];
-	}
-	// histogram transformation
-	__syncthreads();
-	printf("4\n");
-	if(x < 32 && y < 8){
-		uchar v = dGray.ptr(y)[x];
-		dStretch.ptr(y)[x] = dp1[v]*255 + 0.5;
-	}
 }
 
 //single picture , one block one thread
@@ -266,52 +200,13 @@ void launch_stretchKernel(GpuMat * dGrayImage,GpuMat * dStretchImage, int nSampl
 
 	int * num  = (int *)calloc(nSamples * 256 , sizeof(int));
 	double * p = (double *)calloc(nSamples * 256 , sizeof(double));
-//	Mat tempImage[nSampexpectedles];
-//	for(int i = 0; i < nSamples; i++){
-//		dGray[i].download(tempImage[i]);
-//		cv::namedWindow("x");
-//		cv::imshow("x",tempImage[i]);
-//		cv::waitKey(1);
-//	}
 
 	int threadsPerBlock = 512;
 	int blockNum = (int) ceil( (float) nSamples / threadsPerBlock );
 	init<<<blockNum, threadsPerBlock>>>(wMulh, dp, dp1, dnum, nSamples, threadsPerBlock);
 	cudaDeviceSynchronize();
 
-//	Mat tempImage[nSamples];
-//	for(int i = 0; i < nSamples; i++){
-//		dStretchImage[i].download(tempImage[i]);
-//		cv::namedWindow("x");
-//		cv::imshow("x",tempImage[i]);
-//		cv::waitKey(1);
-//	}
-//	printf("type:%d\n",dGrayImage->type());
-
-
-//	uchar * dG1 = dGrayImage->operator cv::gpu::PtrStepSz<uchar>();
-
-//
-//	for(int i = 0 ; i < nSamples ; i++){
-//			hG[i]= dGrayImage[i];//.operator cv::gpu::PtrStepSz<uchar>();//(PtrStepSzb)dGrayImage[i];
-//			hS[i]= dStretchImage[i];//.operator cv::gpu::PtrStepSz<uchar>();//(PtrStepSzb)dStretchImage[i];
-//			}
-//
-
-//
-
-//
-//	cudaMemcpy(&dG,&hG,nSamples,cudaMemcpyHostToDevice);
-//	cudaMemcpy(&dS,&hS,nSamples,cudaMemcpyHostToDevice);
-//
-////	for(int i = 0 ; i < nSamples ; i++){
-////		dG[i]= dGrayImage[i];//.operator cv::gpu::PtrStepSz<uchar>();//(PtrStepSzb)dGrayImage[i];
-////		dS[i]= dStretchImage[i];//.operator cv::gpu::PtrStepSz<uchar>();//(PtrStepSzb)dStretchImage[i];
-////		}
-//
-//	dim3 block(32,32);
-
-	// gray stretch, one block multiple threads
+	// gray stretch, multiple blocks multiple threads
 
 //	cout<<"dG data size:"<<sizeof(dG->data)<<endl;
 //	cout<<"size_t size:"<<sizeof(size_t)<<endl;
@@ -363,68 +258,19 @@ void launch_stretchKernel(GpuMat * dGrayImage,GpuMat * dStretchImage, int nSampl
 //			dStretchImage[i].download(tempImage[i]);
 //			cv::namedWindow("x");
 //			cv::imshow("x",tempImage[i]);
-//			cv::waitKey(50);
+//			cv::waitKey(10);
 //			cout<<i<<endl;
 //	}
 
-
 	// gray stretch, one block one thread
-	for(int i = 0 ; i < nSamples ; i++)
-	{
-		testKernel2<<<1, 1>>>(dGrayImage[i], dStretchImage[i], wMulh, dp ,dp1, dnum , nSamples, threadsPerBlock);
-	//	testKernel<<<1, (dGrayImage[i].cols,dGrayImage[i].rows)>>>(dGrayImage[i], dStretchImage[i], wMulh, dp ,dp1, dnum , nSamples, threadsP);
-	//	testKernel<<<1, block>>>(dGrayImage[0], dStretchImage[0], wMulh, dp ,dp1, dnum , nSamples, threadsP);
-	//	stretchKernel<<<blockNum, threadsP>>>(dGrayImage, dStretchImage, wMulh, dp ,dp1, dnum , nSamples, threadsP);
-	}
-
-
-	unsigned int * nThreshold = new unsigned int[nSamples];
-
-//	cudaDeviceSynchronize();
-//	cudaMemcpy(num,dnum,256*sizeof(int),cudaMemcpyDeviceToHost);
-//	cudaMemcpy(p,dp1,256*sizeof(double),cudaMemcpyDeviceToHost);
-
-//	cout<<"num:\t";
-//	for(int i = 0;i < 256 ;i++)
-//		cout<<num[i]<<" ";
-//	cout<<endl;
-//
-//	cout<<"p:\t";
-//	for(int i = 0;i < 256 ;i++)
-//		cout<<p[i]<<" ";
-//	cout<<endl;
-
-
-//
-	//	dStretchImage[i].data = dS[i].data;}
-
-//	cudaMemcpy(&hG,&dG,nSamples,cudaMemcpyDeviceToHost);
-//	cudaMemcpy(&hS,&dS,nSamples,cudaMemcpyDeviceToHost);
-
-//	Mat tempImage[nSamples];
-
-
-//	for(int i = 0 ; i < nSamples ; i++){
-//		for( int j = 0 ; j < dS[i].rows; j++)
-//			for( int k = 0 ; k < dS[i].cols; k++)
-//				tempImage[i].at<uchar>(j,k) = hS[i](j,k);
+//	for(int i = 0 ; i < nSamples ; i++)
+//	{
+//		testKernel2<<<1, 1>>>(dGrayImage[i], dStretchImage[i], wMulh, dp ,dp1, dnum , nSamples, threadsPerBlock);
+//	//	testKernel<<<1, (dGrayImage[i].cols,dGrayImage[i].rows)>>>(dGrayImage[i], dStretchImage[i], wMulh, dp ,dp1, dnum , nSamples, threadsP);
+//	//	testKernel<<<1, block>>>(dGrayImage[0], dStretchImage[0], wMulh, dp ,dp1, dnum , nSamples, threadsP);
+//	//	stretchKernel<<<blockNum, threadsP>>>(dGrayImage, dStretchImage, wMulh, dp ,dp1, dnum , nSamples, threadsP);
 //	}
 
-//	for(int i = 0 ; i < nSamples ; i++){
-//				dG[i]= dGrayImage[i];//.operator cv::gpu::PtrStepSz<uchar>();//(PtrStepSzb)dGrayImage[i];
-//				dS[i]= dStretchImage[i];//.operator cv::gpu::PtrStepSz<uchar>();//(PtrStepSzb)dStretchImage[i];
-//				}
-
-//	for(int i = 0; i < nSamples; i++){
-////		tempImage[0].create(32,16,CV_8UC1);
-////		dStretchImage[0].upload(tempImage[0]);
-//		//cout<<"YYY:"<<dStretchImage[i].isContinuous()<<endl;//'\t'<<dStretchImage[0].<<'\t'<<dStretchImage[0].step<<endl;
-//		dStretchImage[i].download(tempImage[i]);
-//		cv::namedWindow("x");
-//		cv::imshow("x",tempImage[i]);
-//		cv::waitKey(10);
-//		cout<<i<<endl;
-//	}
 }
 
 __device__ void GetHistogram(unsigned char * pImageData, int nWidth, int nHeight, int nWidthStep, int * pHistogram)
