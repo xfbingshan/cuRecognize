@@ -23,7 +23,7 @@ using namespace cv::gpu;
 
 #define CHARACTER 193  //字符特征数
 
-
+//float num_character[CHARACTER]={0};
 
 //* -----------------------字符特征提取(垂特征直方向数据统计、13点法、梯度分布特征)-----------------------------------------//
 // --Input：
@@ -54,6 +54,7 @@ using namespace cv::gpu;
 
 
 extern bool Pretreatment(GpuMat* dSrcImage, GpuMat* dDstImage, int nSamples);
+extern bool Character(GpuMat* dPreImage,float ** character,int nSamples);
 
 int main(int argc, char* argv[])
 {
@@ -116,23 +117,21 @@ int main(int argc, char* argv[])
   	cout<<(clock() - BeforeRunTime)*1000/CLOCKS_PER_SEC<<"ms"<<'\t'<<":Images load succeed"<<endl;
 
   	//预处理
-  	//unfinished
   	GpuMat dPreImage[nSamples];
   	cout<<(clock() - BeforeRunTime)*1000/CLOCKS_PER_SEC<<"ms"<<'\t'<<":Images pretreat start "<<endl;
   	Pretreatment(dSrcImage, dPreImage, nSamples);
   	cout<<(clock() - BeforeRunTime)*1000/CLOCKS_PER_SEC<<"ms"<<'\t'<<":Images pretreat succeed "<<endl;
 
+  	//提取字符特征
+
+  	float character[nSamples][CHARACTER];
+  	cout<<(clock() - BeforeRunTime)*1000/CLOCKS_PER_SEC<<"ms"<<'\t'<<":Feature extraction start "<<endl;
+	Character(dPreImage, (float **)character, nSamples);
+	cout<<(clock() - BeforeRunTime)*1000/CLOCKS_PER_SEC<<"ms"<<'\t'<<":Feature extraction succeed "<<endl;
+
   	//yuanlaide
 //    for(int i =0; i<classes; i++)
 //    {
-//
-//
-//			IplImage *pre_img = Pretreatment(src_image);
-//
-//			//提取字符特征
-//
-//			IplImage* img=cvCreateImage(cvGetSize(pre_img),IPL_DEPTH_8U,1);
-//			cvCopyImage(pre_img, img);
 //
 //			float* character = CodeCharacter(img);//提取字符特征
 //			Mat tempMat = Mat(1, CHARACTER, CV_32FC1, character);//将特征数组转化成特征矩阵，以便于后续处理
