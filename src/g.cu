@@ -137,7 +137,7 @@ __global__ void testKernel2(PtrStepSzb dGray, PtrStepSzb dStretch, int* wMulh, d
 }
 
 // one block multiple threads
-__global__ void testKernel3(PtrStepSzb* dGray, PtrStepSzb* dStretch, int* wMulh, double* dp, double* dp1, int* dnum, int nSamples, int threadsPerBlock)
+__global__ void stretchKernel3(PtrStepSzb* dGray, PtrStepSzb* dStretch, int* wMulh, double* dp, double* dp1, int* dnum, int nSamples, int threadsPerBlock)
 {
 	int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -234,7 +234,10 @@ void launch_stretchKernel(GpuMat * dGrayImage,GpuMat * dStretchImage, int nSampl
 	cudaMemcpy(dG, hG, nSamples * sizeof(PtrStepSzb),cudaMemcpyHostToDevice);
 	cudaMemcpy(dS, hS, nSamples * sizeof(PtrStepSzb),cudaMemcpyHostToDevice);
 
-	testKernel3<<<blockNum, threadsPerBlock>>>(dG, dS, wMulh, dp ,dp1, dnum , nSamples, threadsPerBlock);
+	stretchKernel3<<<blockNum, threadsPerBlock>>>(dG, dS, wMulh, dp ,dp1, dnum , nSamples, threadsPerBlock);
+
+	cudaMemcpy(hG, dG, nSamples * sizeof(PtrStepSzb),cudaMemcpyDeviceToHost);
+	cudaMemcpy(hS, dS, nSamples * sizeof(PtrStepSzb),cudaMemcpyDeviceToHost);
 
 	for( int i = 0 ; i < nSamples ; i++)
 	{
@@ -256,8 +259,8 @@ void launch_stretchKernel(GpuMat * dGrayImage,GpuMat * dStretchImage, int nSampl
 //	//		dStretchImage[0].upload(tempImage[0]);
 //			//cout<<"YYY:"<<dStretchImage[i].isContinuous()<<endl;//'\t'<<dStretchImage[0].<<'\t'<<dStretchImage[0].step<<endl;
 //			dStretchImage[i].download(tempImage[i]);
-//			cv::namedWindow("x");
-//			cv::imshow("x",tempImage[i]);
+//			cv::namedWindow("StretchImage");
+//			cv::imshow("StretchImage",tempImage[i]);
 //			cv::waitKey(10);
 //			cout<<i<<endl;
 //	}
@@ -290,7 +293,7 @@ __device__ void GetHistogram(unsigned char * pImageData, int nWidth, int nHeight
 	}
 
 }
-__device__ void Otsu(unsigned char * pImageData, unsigned int * nThreshold, int nWidth, int nHeight, int nWidthStep)
+__device__ void Otsu(unsigned char * pImageData, int nWidth, int nHeight, int nWidthStep, unsigned int & dThreshold)
 {
 	int    i          = 0;
 	int    j          = 0;
@@ -302,7 +305,7 @@ __device__ void Otsu(unsigned char * pImageData, unsigned int * nThreshold, int 
 	double v          = 0;
 	double dVariance  = 0;
 	double dMaximum   = 0;
-//	int    nThreshold = 0;
+
 	int    nHistogram[256]={0};
 	// 获取直方图
 	GetHistogram(pImageData, nWidth, nHeight, nWidthStep, nHistogram);
@@ -340,56 +343,100 @@ __device__ void Otsu(unsigned char * pImageData, unsigned int * nThreshold, int 
 		if (dVariance > dMaximum)
 		{
 			dMaximum = dVariance;
-			*nThreshold = j;
+			dThreshold = j;
 		}
 	}
 }
 
-__device__ void myThreshold(GpuMat * src,GpuMat * dst, unsigned int nThreshold)
+__device__ void myThreshold(PtrStepSzb src,PtrStepSzb & dst, unsigned int nThreshold)
 {
-	for(int i = 0 ; i < src->cols; i++)
-		for(int j = 0; j < src->rows; j++)
+	for(int y = 0; y < src.rows; y++)
+		for(int x = 0 ; x < src.cols; x++)
 		{
-			if( *(src->datastart + i * src->step + j) > nThreshold)
-				*(dst->datastart + i * dst->step + j) = 255;
+			if( src(y,x) > nThreshold)
+				dst(y,x) = 255;
 			else
-				*(dst->datastart + i * dst->step + j) = 0;
+				dst(y,x) = 0;
 		}
 }
 
-__global__ void binaryKernel(GpuMat * src, GpuMat * dst, unsigned int * nThreshold , int nSamples, int threadsPerBlock)
+__global__ void binaryKernel2(PtrStepSzb* src, PtrStepSzb* dst, unsigned int * dThreshold , int nSamples)
 {
-	const int tid = blockIdx.x * threadsPerBlock + threadIdx.x;
+	const int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
 	if(tid < nSamples){
-		Otsu(src[tid].data, &nThreshold[tid], src[tid].cols, src[tid].rows, src[tid].step);
-		myThreshold(&src[tid], &dst[tid], nThreshold[tid]);
-		printf("%u\n",nThreshold[tid]);
+		Otsu(src[tid].data, src[tid].cols, src[tid].rows, src[tid].step, dThreshold[tid]);
+		myThreshold(src[tid], dst[tid], dThreshold[tid]);
 	}
 }
-/*
-__global__ void binaryKernel2(PtrStepSzb src, PtrStepSzb dst, unsigned int & nThreshold , int nSamples, int threadsPerBlock)
-{
-	const int tid = blockIdx.x * threadsPerBlock + threadIdx.x;
-
-	if(tid < nSamples){
-		Otsu(src[tid].data, &nThreshold[tid], src[tid].cols, src[tid].rows, src[tid].step);
-		myThreshold(&src[tid], &dst[tid], nThreshold[tid]);
-		printf("%u\n",nThreshold[tid]);
-	}
-}*/
 
 //二值处理
 //extern "C"
-void launch_binaryKernel(GpuMat * dStretch, GpuMat * dBinaryImage, int nSamples)
+void launch_binaryKernel(GpuMat * dStretchImage, GpuMat * dBinaryImage, int nSamples)
 {
-	unsigned int * nThreshold = new unsigned int[nSamples];
+	// GpuMat to PtrStepSzb
+	PtrStepSzb * dS = NULL;
+	PtrStepSzb * dB = NULL;
 
-//	int threadsPerBlock = 256;
-//	int blockNum = (int) ceil( (float) nSamples / threadsPerBlock );
-//	binaryKernel<<<blockNum, threadsPerBlock>>>(dStretch, dBinaryImage, nThreshold, nSamples, threadsPerBlock);
-//	for(int i = 0 ; i < nSamples; i++)
-//	{
-//		binaryKernel2<<<1, 1>>>(dStretch, dBinaryImage, nThreshold, nSamples, threadsPerBlock);
+	PtrStepSzb hS[nSamples];
+	PtrStepSzb hB[nSamples];
+
+	for( int i = 0 ; i < nSamples ; i++)
+	{
+		hS[i].cols = dStretchImage[i].cols;
+		hS[i].rows = dStretchImage[i].rows;
+		hS[i].data = dStretchImage[i].data;
+		hS[i].step = dStretchImage[i].step;
+
+		hB[i].cols = dBinaryImage[i].cols;
+		hB[i].rows = dBinaryImage[i].rows;
+		hB[i].data = dBinaryImage[i].data;
+		hB[i].step = dBinaryImage[i].step;
+	}
+
+	cudaMalloc((void **)&dS, nSamples * sizeof(PtrStepSzb));
+	cudaMalloc((void **)&dB, nSamples * sizeof(PtrStepSzb));
+
+	cudaMemcpy(dS, hS, nSamples * sizeof(PtrStepSzb),cudaMemcpyHostToDevice);
+	cudaMemcpy(dB, hB, nSamples * sizeof(PtrStepSzb),cudaMemcpyHostToDevice);
+
+	// threshold
+	unsigned int * hThreshold = new unsigned int[nSamples];
+	unsigned int * dThreshold = NULL;
+
+	cudaMalloc((void **)&dThreshold, nSamples * sizeof(unsigned int));
+
+	// kernel
+	int threadsPerBlock = 512;
+	int blockNum = (int) ceil( (float) nSamples / threadsPerBlock );
+	binaryKernel2<<<blockNum, threadsPerBlock>>>(dS, dB, dThreshold, nSamples);
+
+	cudaMemcpy(hS, dS, nSamples * sizeof(PtrStepSzb),cudaMemcpyDeviceToHost);
+	cudaMemcpy(hB, dB, nSamples * sizeof(PtrStepSzb),cudaMemcpyDeviceToHost);
+
+	// PtrStepSzb to GpuMat
+	for( int i = 0 ; i < nSamples ; i++)
+	{
+		dStretchImage[i].cols = hS[i].cols;
+		dStretchImage[i].rows = hS[i].rows;
+		dStretchImage[i].data = hS[i].data;
+		dStretchImage[i].step = hS[i].step;
+
+		dBinaryImage[i].cols = hB[i].cols;
+		dBinaryImage[i].rows = hB[i].rows;
+		dBinaryImage[i].data = hB[i].data;
+		dBinaryImage[i].step = hB[i].step;
+
+	}
+
+//	//show to check
+//	Mat tempImage[nSamples];
+//	for(int i = 0; i < nSamples; i++){
+//			dBinaryImage[i].download(tempImage[i]);
+//			cv::namedWindow("binaryImage");
+//			cv::imshow("binaryImage",tempImage[i]);
+//			cv::waitKey(10);
+//			cout<<i<<endl;
 //	}
+
 }
