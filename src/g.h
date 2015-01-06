@@ -25,5 +25,6 @@ using namespace cv::gpu;
 //extern "C" {
 	void launch_binaryKernel(GpuMat * dStretch, GpuMat * dBinaryImage, int train_samples);
 	void launch_stretchKernel(GpuMat * dGray,GpuMat * dStretch, int train_samples);
+	void launch_characterKernel(GpuMat * dPreImage, float* character, int nSamples);
 //}
 #endif

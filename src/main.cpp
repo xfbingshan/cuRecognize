@@ -54,7 +54,7 @@ using namespace cv::gpu;
 
 
 extern bool Pretreatment(GpuMat* dSrcImage, GpuMat* dDstImage, int nSamples);
-extern bool Character(GpuMat* dPreImage,float ** character,int nSamples);
+extern bool Character(GpuMat* dPreImage,float* character,int nSamples);
 
 int main(int argc, char* argv[])
 {
@@ -124,9 +124,25 @@ int main(int argc, char* argv[])
 
   	//提取字符特征
 
-  	float character[nSamples][CHARACTER];
+  	float * dCharacter;
+  	float hCharacter[nSamples * CHARACTER];
+  	for(int i = 0 ; i < nSamples * CHARACTER; i++)
+  	{
+  		hCharacter[i] = 0;
+  	}
+  	cudaMalloc((void **)&dCharacter,nSamples * CHARACTER * sizeof(float));
+  	cudaMemcpy(dCharacter, hCharacter, nSamples * CHARACTER * sizeof(float),cudaMemcpyHostToDevice);
   	cout<<(clock() - BeforeRunTime)*1000/CLOCKS_PER_SEC<<"ms"<<'\t'<<":Feature extraction start "<<endl;
-	Character(dPreImage, (float **)character, nSamples);
+	Character(dPreImage, dCharacter, nSamples);
+//	Character(dPreImage, dCharacter, 1);
+	cudaMemcpy(hCharacter, dCharacter, nSamples * CHARACTER * sizeof(float),cudaMemcpyDeviceToHost);
+	for(int i = 0; i < nSamples ; i++)
+	{
+		for(int j = 53; j < 93 ; j++)
+			cout<<"("<<i<<","<<j<<"):"<<'\t'<<hCharacter[i * CHARACTER + j]<<endl;
+		cout<<endl;
+	}
+
 	cout<<(clock() - BeforeRunTime)*1000/CLOCKS_PER_SEC<<"ms"<<'\t'<<":Feature extraction succeed "<<endl;
 
   	//yuanlaide
